@@ -21,32 +21,48 @@ function simulate({ balance, homeRate, yearsLeft, equity, investRate, returnRate
   const iR = returnRate / 100 / 12;
   const n = Math.max(1, Math.round(yearsLeft * 12));
   const pay = iH > 0 ? (balance * iH) / (1 - Math.pow(1 + iH, -n)) : balance / n;
+  const holdPerMonth = (equity * (investRate / 100)) / 12;
 
-  let homeBal = balance;
+  // baseBal  — no equity loan taken; the monthly hold cost is redirected to extra home loan repayments
+  // stratBal — equity loan taken; home loan paid at minimum only (hold cost services the equity loan)
+  let baseBal = balance;
+  let stratBal = balance;
   let inv = equity;
   let baselineMonth = null;
   let strategyMonth = null;
   let holdCost = 0;
-  const points = [{ year: START_YEAR, baseline: balance, netDebt: balance + equity - equity, invest: equity }];
+
+  const points = [{ year: START_YEAR, baseline: balance, netDebt: balance, invest: equity }];
 
   for (let m = 1; m <= MAX_MONTHS; m++) {
-    if (homeBal > 0) {
-      homeBal = homeBal * (1 + iH) - pay;
-      if (homeBal <= 0) {
-        homeBal = 0;
+    // Baseline: minimum repayment + redirect hold cost toward extra principal repayments
+    if (baseBal > 0) {
+      baseBal = baseBal * (1 + iH) - pay - holdPerMonth;
+      if (baseBal <= 0) {
+        baseBal = 0;
         if (baselineMonth === null) baselineMonth = m;
       }
     }
-    inv = inv * (1 + iR);
-    if (strategyMonth === null) {
-      holdCost += (equity * (investRate / 100)) / 12;
-      if (inv >= homeBal + equity) strategyMonth = m;
+
+    // Strategy: minimum repayment only — hold cost goes to servicing the equity loan interest
+    if (stratBal > 0) {
+      stratBal = stratBal * (1 + iH) - pay;
+      if (stratBal < 0) stratBal = 0;
     }
+
+    inv = inv * (1 + iR);
+
+    if (strategyMonth === null) {
+      holdCost += holdPerMonth;
+      // Strategy is "debt-free" when the investment covers both the home loan and equity loan balances
+      if (inv >= stratBal + equity) strategyMonth = m;
+    }
+
     if (m % 12 === 0) {
       points.push({
         year: START_YEAR + m / 12,
-        baseline: Math.round(homeBal),
-        netDebt: Math.round(Math.max(0, strategyMonth !== null && m >= strategyMonth ? 0 : homeBal + equity - inv)),
+        baseline: Math.round(baseBal),
+        netDebt: Math.round(Math.max(0, strategyMonth !== null && m >= strategyMonth ? 0 : stratBal + equity - inv)),
         invest: Math.round(inv),
       });
     }
@@ -141,7 +157,7 @@ export default function EquityAccelerator() {
             Does borrowing to invest get you debt-free sooner?
           </h1>
           <p style={{ color: "#5A6B80", fontSize: 15, maxWidth: 640, lineHeight: 1.6, marginTop: 10 }}>
-            Model pulling usable equity from your home, paying interest on it, and investing the lump sum. Every assumption below is yours to change — the answer depends entirely on them.
+            Model pulling usable equity from your home and investing the lump sum, paying interest-only on the equity loan. The "stay the course" path redirects that same monthly interest toward extra home loan repayments — a like-for-like comparison. Every assumption below is yours to change.
           </p>
         </header>
 
@@ -251,7 +267,7 @@ export default function EquityAccelerator() {
                     contentStyle={{ borderRadius: 8, border: "1px solid #E1E6EB", fontSize: 13 }}
                   />
                   <Legend wrapperStyle={{ fontSize: 13 }} />
-                  <Line type="monotone" dataKey="baseline" name="Stay the course (home loan)" stroke="#5A6B80" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="baseline" name="Stay the course (extra repayments)" stroke="#5A6B80" strokeWidth={2} dot={false} />
                   <Line type="monotone" dataKey="netDebt" name="Equity strategy (net debt)" stroke={verdictColor} strokeWidth={2.5} dot={false} />
                   {result.baselineMonth && (
                     <ReferenceDot x={Math.round(START_YEAR + result.baselineMonth / 12)} y={0} r={5} fill="#5A6B80" stroke="#fff" strokeWidth={2} />
